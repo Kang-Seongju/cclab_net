@@ -13,7 +13,7 @@ def create_modules(module_defs, img_size, arc):
     hyperparams = module_defs.pop(0)
     if int(hyperparams['phase']) == 0: 
         phase = "train"
-    else :
+    else:
         phase = "inference"
     output_filters = [int(hyperparams['channels'])]
     module_list = nn.ModuleList()
@@ -51,11 +51,9 @@ def create_modules(module_defs, img_size, arc):
             modules.add_module('gelan', G_ELAN(output_filters[-1], phase))
 
         elif mdef['type'] == 'attention':
-            maxpool = nn.MaxPool2d((2, 2))
-            modules.add_module('MaxPool2d', maxpool)
-            # size = int(mdef['size']) #kernel_size
-            # filters = int(mdef['filters']) # out_channel
-            # modules.add_module('attention', patch_wise_attention_layer(in_channel = output_filters[-1], kernel_size= size))
+            size = int(mdef['size']) #kernel_size
+            filters = int(mdef['filters']) # out_channel
+            modules.add_module('attention', patch_wise_attention_layer(in_channel = output_filters[-1], kernel_size= size))
 
         elif mdef['type'] == 'maxpool':
             size = int(mdef['size'])
@@ -120,8 +118,7 @@ class patch_wise_attention_layer(nn.Module):
         self.fp = nn.ReflectionPad2d(1)
 
     def forward(self, x):
-        # bs , c, h, w 
-        # print(x)
+        # bs , c, h, w
         in_dim = x.shape
         bs, ch, h, w = in_dim
         patch_cnt = h // self.kernel_size
@@ -368,7 +365,6 @@ class CCLAB(nn.Module):
         self.module_defs = parse_model_cfg(cfg)
         self.module_list, self.routs = create_modules(self.module_defs, img_size, arc)
         self.yolo_layers = get_yolo_layers(self)
-
         # Darknet Header https://github.com/AlexeyAB/darknet/issues/2914#issuecomment-496675346
         self.version = np.array([0, 2, 5], dtype=np.int32)  # (int32) version info: major, minor, revision
         self.seen = np.array([0], dtype=np.int64)  # (int64) number of images seen during training

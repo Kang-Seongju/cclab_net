@@ -1,6 +1,6 @@
 import argparse
 import json
-from models import *
+from proposed_model import *
 from utils.datasets import *
 from utils.utils import *
 
@@ -16,36 +16,12 @@ def test(cfg,
          model=None,
          dataloader=None,
          class_list = None):
-    # Initialize/load model and set device
-    if model is None:
-        device = torch_utils.select_device(opt.device, batch_size=batch_size)
-        verbose = True
 
-        # Remove previous
-        for f in glob.glob('test_batch*.jpg'):
-            os.remove(f)
-
-        # Initialize model
-        model = Darknet(cfg, img_size).to(device)
-
-        # Load weights
-        attempt_download(weights)
-        if weights.endswith('.pt'):  # pytorch format
-            model.load_state_dict(torch.load(weights, map_location=device)['model'])
-        else:  # darknet format
-            _ = load_darknet_weights(model, weights)
-
-        if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
-    else:  # called by train.py
-        device = next(model.parameters()).device  # get model device
-        verbose = True
+    device = next(model.parameters()).device  # get model device
+    verbose = True
 
     # Configure run
-
-
     nc = 80  # number of classes
-    path = valid_path  # path to test images
     names = class_list  # class names
     iou_thres = torch.linspace(0.5, 0.95, 10).to(device)  # for mAP@0.5:0.95
     iou_thres = iou_thres[0].view(1)  # for mAP@0.5
@@ -58,7 +34,7 @@ def test(cfg,
     p, r, f1, mp, mr, map, mf1 = 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3)
     jdict, stats, ap, ap_class = [], [], [], []
-    for batch_i, (paths, imgs, targets) in enumerate(tqdm(dataloader, desc=s)):
+    for batch_i, (imgs, targets, paths, _)  in enumerate(tqdm(dataloader, desc=s)):
         imgs = imgs.to(device).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         _, _, height, width = imgs.shape  # batch size, channels, height, width

@@ -356,23 +356,22 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     for box in img_bbox[img]:
                         custom_cls_id = self.cls.index(cls_dic[box[0]])
                         f.write(str(custom_cls_id)+' '+ str(box[1])+' '+ str(box[2])+' '+ str(box[3])+' '+ str(box[4]) + '\n')
+
             with open(os.path.join(self.shape_path, 'shapes.txt'), 'w') as f:
                 for sh in shapes:
                     f.write(str(sh[1]) + ' ' + str(sh[2]) + ' ' + sh[0])
-
         else:
-            with open(self.read_file, 'r') as f:
-                lines = f.readlines()
 
-                for _str in lines:
-                    L = _str.rstrip()
-                    f_name = L.split('/')[3].split('.')[0]
-                    img_path = os.path.join(self.image_path, f_name+'.jpg')
-                    lb_path = os.path.join(self.label_path, f_name+'.txt')
+            images_list = os.listdir(self.image_path)
+            for i in images_list:
+                img_path = os.path.join(self.image_path, i)
+                label_name = i.replace('jpg','txt')
+                self.img_files.append(img_path)
+                self.label_files.append(os.path.join(self.label_path, label_name))
 
-                    self.img_files.append(img_path)
-                    self.label_files.append(lb_path)
-                
+                # if len(self.img_files) > 32:
+                #     break
+
         n = len(self.img_files)
 
         bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index

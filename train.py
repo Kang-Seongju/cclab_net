@@ -3,8 +3,8 @@ import argparse
 import torch.distributed as dist
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
-from utils.parse_config import parse_data_cfg
 
+from torchsummary import summary as summary_
 from torch.utils.data import DataLoader
 
 import test  # import test.py to get mAP after each epoch
@@ -40,52 +40,16 @@ if f:
     for k, v in zip(hyp.keys(), np.loadtxt(f[0])):
         hyp[k] = v
 
-def _create_data_loader(anno, img_path, batch_size, img_size, multiscale_training):
-    dataset = ListDataset(
-        img_path,
-        anno,
-        img_size,
-        multiscale_training,
-        AUGMENTATION_TRANSFORMS
-    )
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=dataset.collate_fn,
-    )
-    return dataloader
-
-def _create_validation_data_loader(anno, img_path, batch_size, img_size):
-    dataset = ListDataset(
-        img_path, 
-        anno, 
-        img_size, 
-        False, 
-        DEFAULT_TRANSFORMS
-    )
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=dataset.collate_fn,
-    )
-    return dataloader
-
 def train(args, model_cfg, device, tb_writer, path, mixed_precision):
-
-    
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     wdir = path.model_save_path
     backup_wdir = os.path.join(wdir, 'backup')
     createFolder(backup_wdir)
     createFolder(wdir)
-    # last = wdir + 'last.pt'
-    # best = wdir + 'best.pt'
-    # results_file = 'results.txt'
+    last = wdir + 'last.pt'
+    best = wdir + 'best.pt'
+    results_file = 'results.txt'
 
-    cfg = args.cfg
     img_size = args.img_size
 
     last = os.path.join(wdir, 'custom_last.pt')
@@ -101,7 +65,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
 
     train_path = 'train2017.txt'
     test_path = 'val2017.txt'
-    cls_path = '/home/kang/coco/coco.names'
+    cls_path = '/home/cclab/coco/coco.names'
     cls = read_class(cls_path)
     nc = len(cls)
     # Initialize
@@ -118,7 +82,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
         os.remove(f)
 
     # Initialize model
-    model = CCLAB(cfg, arc=args.arc).to(device)
+    model = CCLAB(model_cfg, arc=args.arc).to(device)
     
     # Optimizer
     pg0, pg1 = [], []  # optimizer parameter groups
@@ -170,6 +134,8 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     else :
         model.apply(weights_init_normal)
 
+    summary_(model, (3, 416, 416), batch_size=32)
+
     # Scheduler https://github.com/ultralytics/yolov3/issues/238
     # lf = lambda x: 1 - x / epochs  # linear ramp to zero
     # lf = lambda x: 10 ** (hyp['lrf'] * x / epochs)  # exp ramp
@@ -196,7 +162,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
         model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
 
     #transform
-    GenOp = True
+    GenOp = False
     # Dataset
     dataset = LoadImagesAndLabels(train_path, path, cls, img_size, batch_size,
                                   augment=True,
@@ -216,15 +182,19 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn)
 
-    testloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path, path, cls, args.img_size, batch_size,
-                                                                     hyp=hyp,
-                                                                     rect=True,
-                                                                     cache_labels=True,
-                                                                     cache_images=args.cache_images,gen = GenOp),
-                                                 batch_size=batch_size,
-                                                 num_workers=nw,
-                                                 pin_memory=True,
-                                                 collate_fn=dataset.collate_fn)
+    testset = LoadImagesAndLabels(test_path, path, cls, args.img_size, batch_size,
+                                  augment=True,
+                                  hyp=hyp,
+                                  rect=True,
+                                  cache_labels=True,
+                                  cache_images=args.cache_images,gen = GenOp)
+
+    testloader = torch.utils.data.DataLoader(testset,
+                                             batch_size=batch_size,
+                                             num_workers=nw,
+                                             shuffle=not args.rect,  # Shuffle=True unless rectangular training is used
+                                             pin_memory=True,
+                                             collate_fn=dataset.collate_fn)
 
     # Start training
     nb = len(dataloader)
@@ -332,15 +302,15 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
         if args.prebias:
             print_model_biases(model)
         elif not args.notest or final_epoch:  # Calculate mAP
-            is_coco = any([x in data for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
-            results, maps = test.test(cfg,
-                                      data,
-                                      batch_size=batch_size,
+            results, maps = test.test(args.cfg,
+                                      path.VAL_DIR,
+                                      batch_size=args.batch_size,
                                       img_size=args.img_size,
                                       model=model,
                                       conf_thres=0.001 if final_epoch else 0.1,  # 0.1 for speed
-                                      save_json=final_epoch and is_coco,
-                                      dataloader=testloader)
+                                      save_json=final_epoch,
+                                      dataloader=testloader,
+                                      class_list= cls)
 
         # Write epoch results
         with open(results_file, 'a') as f:
@@ -425,7 +395,7 @@ def prebias(args,model_cfg, device, tb_writer, path, mixed_precision):
         args.img_weights = a  # reset settings
 
 
-def train_model(args, model_cfg, path):
+def train_model(args, path):
 
     mixed_precision = True
     try:  # Mixed precision training https://github.com/NVIDIA/apex
@@ -450,8 +420,8 @@ def train_model(args, model_cfg, path):
             tb_writer = SummaryWriter()
         except:
             pass
-        prebias(args,model_cfg, device, tb_writer, path,mixed_precision)  # optional
-        train(args,model_cfg, device, tb_writer, path, mixed_precision)  # train normally
+        prebias(args, args.cfg, device, tb_writer, path,mixed_precision)  # optional
+        train(args, args.cfg, device, tb_writer, path, mixed_precision)  # train normally
 
     else:  # Evolve hyperparameters (optional)
         args.notest = True  # only test final epoch
