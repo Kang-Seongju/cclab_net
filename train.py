@@ -5,8 +5,10 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 from utils.parse_config import parse_data_cfg
 
+from torch.utils.data import DataLoader
+
 import test  # import test.py to get mAP after each epoch
-from models import *
+from proposed_model import *
 from utils.datasets import *
 from utils.utils import *
 
@@ -38,9 +40,44 @@ if f:
     for k, v in zip(hyp.keys(), np.loadtxt(f[0])):
         hyp[k] = v
 
+def _create_data_loader(anno, img_path, batch_size, img_size, multiscale_training):
+    dataset = ListDataset(
+        img_path,
+        anno,
+        img_size,
+        multiscale_training,
+        AUGMENTATION_TRANSFORMS
+    )
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=dataset.collate_fn,
+    )
+    return dataloader
 
-def train(args,model_cfg, device, tb_writer, path, mixed_precision):
-    wdir =  os.path.join(path.model_save_path, args.domain)
+def _create_validation_data_loader(anno, img_path, batch_size, img_size):
+    dataset = ListDataset(
+        img_path, 
+        anno, 
+        img_size, 
+        False, 
+        DEFAULT_TRANSFORMS
+    )
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=dataset.collate_fn,
+    )
+    return dataloader
+
+def train(args, model_cfg, device, tb_writer, path, mixed_precision):
+
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    wdir = path.model_save_path
     backup_wdir = os.path.join(wdir, 'backup')
     createFolder(backup_wdir)
     createFolder(wdir)
@@ -48,12 +85,12 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     # best = wdir + 'best.pt'
     # results_file = 'results.txt'
 
-    cfg = model_cfg
+    cfg = args.cfg
     img_size = args.img_size
 
-    last = os.path.join(wdir, args.domain + str(args.classes) + '_'+ args.model + '_last.pt')
-    best = os.path.join(wdir, args.domain + str(args.classes)+ '_'+ args.model + '_best.pt')
-    results_file = os.path.join(wdir, args.domain + str(args.classes)+'_'+ args.model + '_results.txt')
+    last = os.path.join(wdir, 'custom_last.pt')
+    best = os.path.join(wdir, 'custom_best.pt')
+    results_file = os.path.join(wdir, 'custom_results.txt')
 
     args.weights = last if args.resume else args.weights
 
@@ -61,14 +98,12 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     batch_size = args.batch_size
     accumulate = args.accumulate  # effective bs = batch_size * accumulate = 16 * 4 = 64
     weights = last if args.resume else args.weights  # initial training weights
-    data = os.path.join(path.DATA_FILE_DIR, args.domain + '.data')  # args.data
-    data_dict = parse_data_cfg(data)
 
-
-    if 'pw' not in args.arc:  # remove BCELoss positive weights
-        hyp['cls_pw'] = 1.
-        hyp['obj_pw'] = 1.
-
+    train_path = 'train2017.txt'
+    test_path = 'val2017.txt'
+    cls_path = '/home/kang/coco/coco.names'
+    cls = read_class(cls_path)
+    nc = len(cls)
     # Initialize
     init_seeds()
     if args.multi_scale:
@@ -77,17 +112,13 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
         img_size = img_sz_max * 32  # initiate with maximum multi_scale size
         print('Using multi-scale %g - %g' % (img_sz_min * 32, img_size))
 
-    # Configure run
-    train_path = data_dict['train']
-    test_path = data_dict['valid']
-    nc = int(data_dict['classes'])  # number of classes
 
     # Remove previous results
     for f in glob.glob('*_batch*.jpg') + glob.glob(results_file):
         os.remove(f)
 
     # Initialize model
-    model = Darknet(cfg, arc=args.arc).to(device)
+    model = CCLAB(cfg, arc=args.arc).to(device)
     
     # Optimizer
     pg0, pg1 = [], []  # optimizer parameter groups
@@ -110,56 +141,34 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     cutoff = -1  # backbone reaches to cutoff layer
     start_epoch = 0
     best_fitness = float('inf')
-    if weights:
-        attempt_download(weights)
 
-        if weights.endswith('.pt'):  # pytorch format
-            # possible weights are '*.pt', 'yolov3-spp.pt', 'yolov3-tiny.pt' etc.
-            chkpt = torch.load(weights, map_location=device)
+    if args.weights != None:  # pytorch format
+        # possible weights are '*.pt', 'yolov3-spp.pt', 'yolov3-tiny.pt' etc.
+        chkpt = torch.load(args.weights, map_location=device)
 
-            # load model
-            try:
-                chkpt['model'] = {k: v for k, v in chkpt['model'].items() if model.state_dict()[k].numel() == v.numel()}
-                model.load_state_dict(chkpt['model'], strict=False)
-            except KeyError as e:
-                s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s. " \
-                    "See https://github.com/ultralytics/yolov3/issues/657" % (args.weights, args.cfg, args.weights)
-                raise KeyError(s) from e
+        # load model
+        try:
+            chkpt['model'] = {k: v for k, v in chkpt['model'].items() if model.state_dict()[k].numel() == v.numel()}
+            model.load_state_dict(chkpt['model'], strict=False)
+        except KeyError as e:
+            s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s. " \
+                "See https://github.com/ultralytics/yolov3/issues/657" % (args.weights, args.cfg, args.weights)
+            raise KeyError(s) from e
 
-            # load optimizer
-            if chkpt['optimizer'] is not None:
-                optimizer.load_state_dict(chkpt['optimizer'])
-                best_fitness = chkpt['best_fitness']
+        # load optimizer
+        if chkpt['optimizer'] is not None:
+            optimizer.load_state_dict(chkpt['optimizer'])
+            best_fitness = chkpt['best_fitness']
 
-            # load results
-            if chkpt.get('training_results') is not None:
-                with open(results_file, 'w') as file:
-                    file.write(chkpt['training_results'])  # write results.txt
+        # load results
+        if chkpt.get('training_results') is not None:
+            with open(results_file, 'w') as file:
+                file.write(chkpt['training_results'])  # write results.txt
 
-            start_epoch = chkpt['epoch'] + 1
-            del chkpt
-
-        elif len(weights) > 0:  # darknet format
-            # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
-            cutoff = load_darknet_weights(model, weights)
-
-        if args.transfer or args.prebias:  # transfer learning edge (yolo) layers
-            nf = int(model.module_defs[model.yolo_layers[0] - 1]['filters'])  # yolo layer size (i.e. 255)
-
-            if args.prebias:
-                for p in optimizer.param_groups:
-                    # lower param count allows more aggressive training settings: i.e. SGD ~0.1 lr0, ~0.9 momentum
-                    p['lr'] *= 100  # lr gain
-                    if p.get('momentum') is not None:  # for SGD but not Adam
-                        p['momentum'] *= 0.9
-
-            for p in model.parameters():
-                if args.prebias and p.numel() == nf:  # train (yolo biases)
-                    p.requires_grad = True
-                elif args.transfer and p.shape[0] == nf:  # train (yolo biases+weights)
-                    p.requires_grad = True
-                else:  # freeze layer
-                    p.requires_grad = False
+        start_epoch = chkpt['epoch'] + 1
+        del chkpt
+    else :
+        model.apply(weights_init_normal)
 
     # Scheduler https://github.com/ultralytics/yolov3/issues/238
     # lf = lambda x: 1 - x / epochs  # linear ramp to zero
@@ -170,26 +179,15 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(args.epochs * x) for x in [0.8, 0.9]], gamma=0.1)
     scheduler.last_epoch = start_epoch - 1
 
-    # # Plot lr schedule
-    # y = []
-    # for _ in range(epochs):
-    #     scheduler.step()
-    #     y.append(optimizer.param_groups[0]['lr'])
-    # plt.plot(y, label='LambdaLR')
-    # plt.xlabel('epoch')
-    # plt.ylabel('LR')
-    # plt.tight_layout()
-    # plt.savefig('LR.png', dpi=300)
-
-    # Mixed precision training https://github.com/NVIDIA/apex
     if mixed_precision:
         try:
             from apex import amp
             model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
         except:
             print('mixed precision error')
+
     # Initialize distributed training
-    if device.type != 'cpu' and torch.cuda.device_count() > 1:
+    if device != 'cpu' and torch.cuda.device_count() > 1:
         dist.init_process_group(backend='nccl',  # 'distributed backend'
                                 init_method='tcp://127.0.0.1:9999',  # distributed training init method
                                 world_size=1,  # number of nodes for distributed training
@@ -197,14 +195,16 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
         model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
         model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
 
+    #transform
+    GenOp = True
     # Dataset
-    dataset = LoadImagesAndLabels(train_path, img_size, batch_size,
+    dataset = LoadImagesAndLabels(train_path, path, cls, img_size, batch_size,
                                   augment=True,
                                   hyp=hyp,  # augmentation hyperparameters
                                   rect=args.rect,  # rectangular training
                                   image_weights=args.img_weights,
                                   cache_labels=epochs > 10,
-                                  cache_images=args.cache_images and not args.prebias)
+                                  cache_images=args.cache_images and not args.prebias, gen = GenOp)
 
     # Dataloader
     batch_size = min(batch_size, len(dataset))
@@ -216,13 +216,11 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn)
 
-    # Test Dataloader
-    if not args.prebias:
-        testloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path, args.img_size, batch_size,
+    testloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path, path, cls, args.img_size, batch_size,
                                                                      hyp=hyp,
                                                                      rect=True,
                                                                      cache_labels=True,
-                                                                     cache_images=args.cache_images),
+                                                                     cache_images=args.cache_images,gen = GenOp),
                                                  batch_size=batch_size,
                                                  num_workers=nw,
                                                  pin_memory=True,
@@ -268,7 +266,7 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
 
             # Multi-Scale training
             if args.multi_scale:
-                if ni / accumulate % 10 == 0:  #  adjust (67% - 150%) every 10 batches
+                if ni / accumulate % 10 == 0:  #  adjust (67% - 150%) every 10 batches
                     img_size = random.randrange(img_sz_min, img_sz_max + 1) * 32
                 sf = img_size / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
@@ -384,7 +382,7 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
 
             # Save backup every 10 epochs (optional)
             if epoch > 0 and epoch % 5 == 0:
-                torch.save(chkpt, os.path.join(backup_wdir, args.domain + str(args.classes)+ '_'+ args.model + '_backup%g.pt' % epoch))
+                torch.save(chkpt, os.path.join(backup_wdir, 'custom_backup%g.pt' % epoch))
 
             # Delete checkpoint
             del chkpt

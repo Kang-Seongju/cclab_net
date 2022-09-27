@@ -2,25 +2,19 @@ import argparse
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Open Image Dataset Downloader  & train')
-    parser.add_argument("command",
-                        metavar="<command> 'downloader', 'train'",
-                        help="'downloader' or 'train'")
 
     ####################################
     # settings for training
     ####################################
-    parser.add_argument("--model", type=str, default=None,
-                       help="which model you want to make cfg file ex: yolov3, yolov3_tiny, lw_yolo")
-    parser.add_argument("--domain", type=str, default=None, help="domain name for train")
     parser.add_argument("--custom", type=bool, default=True, help="custom train or not")
     parser.add_argument("--classes", type=int, default=80, help="Number of classes for training")
-    parser.add_argument("--cfg", type=str, default=None, help="Path to model definition file (.cfg)")
+    parser.add_argument("--cfg", type=str, default="config/proposed.cfg", help="Path to model definition file (.cfg)")
     parser.add_argument("--data", type=str, default="config/coco.data", help="Path to data config file (.data)")
     parser.add_argument('--epochs', type=int, default=273)  # 500200 batches at bs 16, 117263 images = 273 epochs
     parser.add_argument('--accumulate', type=int, default=2, help='batches to accumulate before optimizing')
     parser.add_argument('--weights', type=str, default=None, help='initial weights')
     parser.add_argument("--n_cpu", type=int, default=8, help="Number of cpu threads to use during batch generation")
-    parser.add_argument('--batch-size', type=int, default=16)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--batch-size', type=int, default=4)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
     parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument("--conf_thres", type=float, default=0.3, help="Evaluation: Object confidence threshold")

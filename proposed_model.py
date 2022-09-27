@@ -51,9 +51,11 @@ def create_modules(module_defs, img_size, arc):
             modules.add_module('gelan', G_ELAN(output_filters[-1], phase))
 
         elif mdef['type'] == 'attention':
-            size = int(mdef['size']) #kernel_size
-            filters = int(mdef['filters']) # out_channel
-            modules.add_module('attention', patch_wise_attention_layer(in_channel = output_filters[-1], kernel_size= size))
+            maxpool = nn.MaxPool2d((2, 2))
+            modules.add_module('MaxPool2d', maxpool)
+            # size = int(mdef['size']) #kernel_size
+            # filters = int(mdef['filters']) # out_channel
+            # modules.add_module('attention', patch_wise_attention_layer(in_channel = output_filters[-1], kernel_size= size))
 
         elif mdef['type'] == 'maxpool':
             size = int(mdef['size'])
@@ -148,9 +150,8 @@ class GaussianDiffusionTrainer(nn.Module):
         self.sf = scale_factor
         
     def forward(self, x_0):
-        noise = torch.randn_like(x_0)
-        x_t = (1. - self.sf)* x_0 + self.sf* noise
-        
+        noise = torch.randn_like(x_0, requires_grad=False)
+        x_t = (1. - self.sf)* x_0 + self.sf * noise
         return x_t
 
 

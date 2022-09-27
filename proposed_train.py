@@ -272,6 +272,7 @@ def train_p(cfg, wt, data_path, out_path, epochs = 100, tb_writer = None):
                 '%g/%g' % (epoch, epochs - 1), '%.3gG' % mem, *mloss, len(targets), img_size)
             pbar.set_description(s)
 
+
             # end batch ------------------------------------------------------------------------------------------------
 
         # Update scheduler
@@ -293,16 +294,16 @@ def train_p(cfg, wt, data_path, out_path, epochs = 100, tb_writer = None):
         )
 
         # Write epoch results
-        with open(results_file, 'a') as f:
-            f.write(s + '%10.3g' * 7 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
+        # with open(results_file, 'a') as f:
+        #     f.write(s + '%10.3g' * 7 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
 
-        # Write Tensorboard results
-        if tb_writer:
-            x = list(mloss) + list(results)
-            titles = ['GIoU', 'Objectness', 'Classification', 'Train loss',
-                      'Precision', 'Recall', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification']
-            for xi, title in zip(x, titles):
-                tb_writer.add_scalar(title, xi, epoch)
+        # # Write Tensorboard results
+        # if tb_writer:
+        #     x = list(mloss) + list(results)
+        #     titles = ['GIoU', 'Objectness', 'Classification', 'Train loss',
+        #               'Precision', 'Recall', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification']
+        #     for xi, title in zip(x, titles):
+        #         tb_writer.add_scalar(title, xi, epoch)
 
         # Update best mAP
         fitness = sum(results[4:])  # total loss
@@ -329,7 +330,7 @@ def train_p(cfg, wt, data_path, out_path, epochs = 100, tb_writer = None):
 
         # end epoch ----------------------------------------------------------------------------------------------------
 
-    plot_results()  # save as results.png
+    # plot_results()  # save as results.png
     print('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))
     dist.destroy_process_group() if torch.cuda.device_count() > 1 else None
     torch.cuda.empty_cache()
