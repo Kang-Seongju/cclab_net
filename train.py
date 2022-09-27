@@ -4,7 +4,7 @@ import torch.distributed as dist
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 
-from torchsummary import summary as summary_
+# from torchsummary import summary as summary_
 from torch.utils.data import DataLoader
 
 import test  # import test.py to get mAP after each epoch
@@ -65,7 +65,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
 
     train_path = 'train2017.txt'
     test_path = 'val2017.txt'
-    cls_path = '/home/cclab/coco/coco.names'
+    cls_path = path.NAMES_DIR
     cls = read_class(cls_path)
     nc = len(cls)
     # Initialize
@@ -134,7 +134,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     else :
         model.apply(weights_init_normal)
 
-    summary_(model, (3, 416, 416), batch_size=32)
+    # summary_(model, (3, 416, 416), batch_size=32)
 
     # Scheduler https://github.com/ultralytics/yolov3/issues/238
     # lf = lambda x: 1 - x / epochs  # linear ramp to zero
@@ -459,8 +459,8 @@ def train_model(args, path):
                 hyp[k] = np.clip(hyp[k], v[0], v[1])
 
             # Train mutation
-            prebias(args, model_cfg, device, tb_writer, path)  # optional
-            results = train(args, model_cfg, device, tb_writer, path,mixed_precision)
+            prebias(args, args.cfg, device, tb_writer, path)  # optional
+            results = train(args, args.cfg, device, tb_writer, path,mixed_precision)
 
             # Write mutation results
             print_mutation(hyp, results, args.bucket)
