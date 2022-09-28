@@ -58,14 +58,13 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     epochs = 1 if args.prebias else args.epochs  # 500200 batches at bs 64, 117263 images = 273 epochs
     batch_size = args.batch_size
     accumulate = args.accumulate  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    weights = last if args.resume else args.weights  # initial training weights
 
-    train_path = 'train2017.txt'
-    test_path = 'val2017.txt'
-    cls_path = os.path.join(path.COCO_DIR,'coco.names')
+    cls_path = os.path.join(path.NAMES_DIR)
     cls = read_class(cls_path)
+
     nc = len(cls)
     # Initialize
+
     init_seeds()
     if args.multi_scale:
         img_sz_min = round(img_size / 32 / 1.5)
@@ -161,10 +160,9 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     #transform
     GenOp = False
     # Dataset
-    dataset = LoadImagesAndLabels(train_path, path, cls, img_size, batch_size,
-                                  augment=False,
+    dataset = LoadImagesAndLabels("train", path, cls, img_size, batch_size,
+                                  augment = False,
                                   hyp=hyp,  # augmentation hyperparameters
-                                  rect=False,  # rectangular training
                                   image_weights=False,
                                   cache_labels=epochs > 10,
                                   cache_images=args.cache_images and not args.prebias,
@@ -173,6 +171,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     # Dataloader
     batch_size = min(batch_size, len(dataset))
     nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])  # number of workers
+
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
                                              num_workers=nw,
@@ -181,9 +180,8 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
                                              collate_fn=dataset.collate_fn)
 
 
-    testloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path, path, cls, img_size, batch_size,
+    testloader = torch.utils.data.DataLoader(LoadImagesAndLabels("val", path, cls, img_size, batch_size,
                                                       hyp=hyp,  # augmentation hyperparameters
-                                                      rect=False,  # rectangular training
                                                       gen= GenOp),
                                              batch_size=batch_size,
                                              num_workers=nw,

@@ -6,18 +6,20 @@ import sys
 
 
 class PATH():
-    def __init__(self):
+    def __init__(self, dataset):
         self.ROOT_DIR = '/home/kang'
-
+        self.dataset = dataset
         self.CUR_DIR = os.path.abspath(os.path.dirname(sys.argv[0]))
-        self.COCO_DIR = os.path.join(self.ROOT_DIR, 'coco')
-        self.VAL_DIR = os.path.join(self.COCO_DIR,'images','val2017')
-        self.NAMES_DIR = os.path.join(self.COCO_DIR,'coco.names')
-        self.model_save_path = os.path.join(self.CUR_DIR,'weights')
+        self.DIR = os.path.join(self.ROOT_DIR, dataset)
+        self.TRAIN_IMG_DIR = os.path.join(self.DIR, 'images', 'train')
+        self.VAL_IMG_DIR = os.path.join(self.DIR,'images','val')
+        self.TRAIN_LAB_DIR = os.path.join(self.DIR, 'labels', 'train')
+        self.VAL_LAB_DIR = os.path.join(self.DIR, 'labels', 'val')
+        self.NAMES_DIR = os.path.join(self.DIR, dataset+'.names')
+        self.model_save_path = os.path.join(self.CUR_DIR, dataset, 'weights')
+        
 
 if __name__ == '__main__':
     args = parse_arguments()
-    
-    path = PATH()
-    print(path.ROOT_DIR)
+    path = PATH('visdrone')
     train_model(args, path)

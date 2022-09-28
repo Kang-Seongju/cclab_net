@@ -273,14 +273,12 @@ def ms_coco(anno_path, cls):
     dic = {}
     img_bbox = {}
     img_path = []
-    shapes = {}
     with open(anno_path, 'r') as cf:
         json_data = json.load(cf)
 
     image = json_data['images']
     for imgs in image:
         dic[imgs['id']]= [imgs['file_name'], imgs['height'], imgs['width']]
-        shapes[imgs['file_name']] = [imgs['height'], imgs['width']]
         img_bbox[imgs['file_name']] = []
         img_path.append(imgs['file_name'])
 
@@ -321,33 +319,99 @@ def ms_coco(anno_path, cls):
     img_bbox = dictionary [id_string] ->list [cls, cx, cy, w, h] with normalization as 0~1
     img_path = file name list
     '''
-    return shapes, classes, img_bbox, img_path
+    return classes, img_bbox, img_path
+
+def visdrone(anno_path, image_path, cls):
+
+    classes = {}
+
+    classes[0] = "background"
+    classes[1] = "pedestrian"
+    classes[2] = "people"
+    classes[3] = "bicycle"
+    classes[4] = "car"
+    classes[5] = "van"
+    classes[6] = "truck"
+    classes[7] = "tricycle"
+    classes[8] = "awning-tricycle"
+    classes[9] = "bus"
+    classes[10] = "motor"
+    classes[11] = "others"
+
+    img_bbox = {}
+    img_path = []
+
+
+    anno_files = os.listdir(anno_path)
+    
+    for anno in anno_files:
+        img_name = anno.replace('txt','jpg')
+        img_bbox[img_name] = []
+        with open(os.path.join(anno_path, anno), 'r') as f:
+            lines = f.readlines()
+            img = cv2.imread(os.path.join(image_path, img_name))
+            height, width = img.shape[:2]
+            wp = 1.0 / float(width) 
+            hp = 1.0 / float(height)
+            
+            flag = False
+            for line in lines:
+                comm = line.rstrip().split(',')
+                x1 = float(comm[0])
+                y1 = float(comm[1])
+                w = float(comm[2])
+                h = float(comm[3])
+                cls_id = int(comm[5])
+
+                if cls_id == 0 or cls_id == 11 or classes[cls_id] not in cls:
+                    # background or others or not include custom class list
+                    classes[cls_id] = "skip"
+                
+                else:
+                    # object and include custom class list
+                    cx = x1 + w / 2.0
+                    cy = y1 + h / 2.0
+                    img_bbox[img_name].append([cls_id, cx*wp, cy* hp, w* wp, h * hp])
+                    flag = True
+
+            if flag == True :
+                img_path.append(img_name)
+                
+    return classes, img_bbox, img_path
+
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
-    def __init__(self, link, path, class_list, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
+    def __init__(self, _type, path, class_list, img_size=416, batch_size=16, augment=False, hyp=None, image_weights=False,
                  cache_labels=False, cache_images=False, gen = False):
+
         self.cls = class_list
-        self._type = link.split('.')[0]
-        self.image_path = os.path.join(path.COCO_DIR, 'images', self._type)
-        self.label_path = os.path.join(path.COCO_DIR, 'labels', self._type)
-        self.shape_path = os.path.join(path.COCO_DIR, 'shapes', self._type)
-        try:
-            if not os.path.exists(self.label_path):
-                os.makedirs(self.label_path)   
-            if not os.path.exists(self.shape_path):
-                os.makedirs(self.shape_path)   
-        except OSError:
-            print('error')
+        self._type = _type
+
+        if self._type == "train":
+            self.image_path = path.TRAIN_IMG_DIR
+            self.label_path = path.TRAIN_LAB_DIR
+        else:
+            self.image_path = path.VAL_IMG_DIR
+            self.label_path = path.VAL_LAB_DIR
 
         self.img_files = []
         self.label_files = []
         self.custom_cls = {}
-        self.read_file = os.path.join(path.COCO_DIR, link)
 
         if gen == True:
 
-            self.anno_path = os.path.join(path.COCO_DIR, 'annotations', 'instances_'+self._type+'.json')
-            shapes, cls_dic, img_bbox, img_path = ms_coco(self.anno_path, self.cls)
+            create_folder(self.label_path)
+
+            if path.dataset == "coco":
+                self.anno_path = os.path.join(path.DIR, 'annotations', self._type+'.json')
+                cls_dic, img_bbox, img_path = ms_coco(self.anno_path, self.cls)
+
+            if path.dataset == "visdrone":
+                
+                self.anno_path = os.path.join(self.image_path, 'annotations')
+                self.image_path = os.path.join(self.image_path, 'images') 
+
+                cls_dic, img_bbox, img_path = visdrone(self.anno_path, self.image_path, self.cls)
 
             for img in img_path:
                 ip = os.path.join(self.image_path, img)
@@ -363,18 +427,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         _str += str(custom_cls_id)+' '+ str(box[1])+' '+ str(box[2])+' '+ str(box[3])+' '+ str(box[4]) + '\n'
 
                 if len(_str) > 0:
-
                     self.label_files.append(lp)
                     self.img_files.append(ip)
                     with open(lp, 'w') as f:
                         f.write(_str)
-
-            with open(os.path.join(self.shape_path, 'shapes.txt'), 'w') as f:
-                for imf in self.img_files:
-                    file_name = imf.split('/')[6]
-                    f.write(str(shapes[file_name][0]) + ' ' + str(shapes[file_name][1]) + ' ' + file_name)
         else:
-
+            if path.dataset == "visdrone":
+                
+                self.anno_path = os.path.join(self.image_path, 'annotations')
+                self.image_path = os.path.join(self.image_path, 'images') 
+                
             label_name = os.listdir(self.label_path)
             for i in label_name:
                 label_path = os.path.join(self.label_path, i)
@@ -382,8 +444,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 self.label_files.append(label_path)
                 self.img_files.append(os.path.join(self.image_path, img_path))
 
-                # if len(self.img_files) > 50:
-                #     break
 
         print(self.custom_cls)
 
@@ -398,41 +458,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.augment = augment
         self.hyp = hyp
         self.image_weights = image_weights
-        self.rect = False if image_weights else rect
-        # self.rect = True
-
-        # Rectangular Training  https://github.com/ultralytics/yolov3/issues/232
-        if self.rect:
-            # Read image shapes
-            sp = self.shape_path +'/shapes.txt'  # shapefile path
-            try:
-                with open(sp, 'r') as f:  # read existing shapefile
-                    s = [x.split() for x in f.read().splitlines()]
-                    assert len(s) == n, 'Shapefile out of sync'
-            except:
-                s = [exif_size(Image.open(f)) for f in tqdm(self.img_files, desc='Reading image shapes')]
-                np.savetxt(sp, s, fmt='%g')  # overwrites existing (if any)
-
-            # Sort by aspect ratio
-            s = np.array(s, dtype=np.float64)
-            ar = s[:, 1] / s[:, 0]  # aspect ratio
-            i = ar.argsort()
-            self.img_files = [self.img_files[i] for i in i]
-            self.label_files = [self.label_files[i] for i in i]
-            self.shapes = s[i]
-            ar = ar[i]
-
-            # Set training image shapes
-            shapes = [[1, 1]] * nb
-            for i in range(nb):
-                ari = ar[bi == i]
-                mini, maxi = ari.min(), ari.max()
-                if maxi < 1:
-                    shapes[i] = [maxi, 1]
-                elif mini > 1:
-                    shapes[i] = [1, 1 / mini]
-
-            self.batch_shapes = np.ceil(np.array(shapes) * img_size / 32.).astype(np.int) * 32
 
         # Preload labels (required for weighted CE training)
         self.imgs = [None] * n
@@ -523,11 +548,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def __len__(self):
         return len(self.img_files)
 
-    # def __iter__(self):
-    #     self.count = -1
-    #     print('ran dataset iter')
-    #     #self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
-    #     return self
+    def __iter__(self):
+        self.count = -1
+        print('ran dataset iter')
+        #self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
+        return self
 
     def __getitem__(self, index):
         if self.image_weights:
@@ -551,7 +576,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             # Letterbox
             h, w = imgs.shape[:2]
-            shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
+            shape = self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(imgs, shape, auto=False, scaleup=self.augment)
 
             # Load labels
@@ -570,22 +595,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     labels[:, 3] = ratio[0] * w * (x[:, 1] + x[:, 3] / 2) + pad[0]
                     labels[:, 4] = ratio[1] * h * (x[:, 2] + x[:, 4] / 2) + pad[1]
 
-        if self.augment:
-            # Augment imagespace
-            if not mosaic:
-                img, labels = random_affine(img, labels,
-                                            degrees=hyp['degrees'],
-                                            translate=hyp['translate'],
-                                            scale=hyp['scale'],
-                                            shear=hyp['shear'])
-
-            # Augment colorspace
-            augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
-
-            # Apply cutouts
-            # if random.random() < 0.9:
-            #     labels = cutout(img, labels)
-
         nL = len(labels)  # number of labels
         if nL:
             # convert xyxy to xywh
@@ -594,21 +603,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Normalize coordinates 0 - 1
             labels[:, [2, 4]] /= img.shape[0]  # height
             labels[:, [1, 3]] /= img.shape[1]  # width
-
-        if self.augment:
-            # random left-right flip
-            lr_flip = True
-            if lr_flip and random.random() < 0.5:
-                img = np.fliplr(img)
-                if nL:
-                    labels[:, 1] = 1 - labels[:, 1]
-
-            # random up-down flip
-            ud_flip = False
-            if ud_flip and random.random() < 0.5:
-                img = np.flipud(img)
-                if nL:
-                    labels[:, 2] = 1 - labels[:, 2]
 
         labels_out = torch.zeros((nL, 6))
         if nL:
