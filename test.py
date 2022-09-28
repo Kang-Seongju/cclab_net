@@ -5,12 +5,7 @@ from utils.datasets import *
 from utils.utils import *
 
 
-def test(cfg,
-         valid_path,
-         weights=None,
-         batch_size=16,
-         img_size=416,
-         conf_thres=0.001,
+def test(conf_thres=0.001,
          nms_thres=0.5,
          save_json=False,
          model=None,
@@ -21,7 +16,7 @@ def test(cfg,
     verbose = True
 
     # Configure run
-    nc = 80  # number of classes
+    nc = len(class_list)  # number of classes
     names = class_list  # class names
     iou_thres = torch.linspace(0.5, 0.95, 10).to(device)  # for mAP@0.5:0.95
     iou_thres = iou_thres[0].view(1)  # for mAP@0.5

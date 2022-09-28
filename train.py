@@ -46,9 +46,6 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     backup_wdir = os.path.join(wdir, 'backup')
     createFolder(backup_wdir)
     createFolder(wdir)
-    last = wdir + 'last.pt'
-    best = wdir + 'best.pt'
-    results_file = 'results.txt'
 
     img_size = args.img_size
 
@@ -65,7 +62,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
 
     train_path = 'train2017.txt'
     test_path = 'val2017.txt'
-    cls_path = path.NAMES_DIR
+    cls_path = os.path.join(path.COCO_DIR,'coco.names')
     cls = read_class(cls_path)
     nc = len(cls)
     # Initialize
@@ -165,12 +162,13 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     GenOp = False
     # Dataset
     dataset = LoadImagesAndLabels(train_path, path, cls, img_size, batch_size,
-                                  augment=True,
+                                  augment=False,
                                   hyp=hyp,  # augmentation hyperparameters
-                                  rect=args.rect,  # rectangular training
-                                  image_weights=args.img_weights,
+                                  rect=False,  # rectangular training
+                                  image_weights=False,
                                   cache_labels=epochs > 10,
-                                  cache_images=args.cache_images and not args.prebias, gen = GenOp)
+                                  cache_images=args.cache_images and not args.prebias,
+                                  gen=GenOp)
 
     # Dataloader
     batch_size = min(batch_size, len(dataset))
@@ -178,21 +176,17 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
                                              num_workers=nw,
-                                             shuffle=not args.rect,  # Shuffle=True unless rectangular training is used
+                                             shuffle=False,  # Shuffle=True unless rectangular training is used
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn)
 
-    testset = LoadImagesAndLabels(test_path, path, cls, args.img_size, batch_size,
-                                  augment=True,
-                                  hyp=hyp,
-                                  rect=True,
-                                  cache_labels=True,
-                                  cache_images=args.cache_images,gen = GenOp)
 
-    testloader = torch.utils.data.DataLoader(testset,
+    testloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path, path, cls, img_size, batch_size,
+                                                      hyp=hyp,  # augmentation hyperparameters
+                                                      rect=False,  # rectangular training
+                                                      gen= GenOp),
                                              batch_size=batch_size,
                                              num_workers=nw,
-                                             shuffle=not args.rect,  # Shuffle=True unless rectangular training is used
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn)
 
@@ -251,15 +245,15 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
                     tb_writer.add_image(fname, cv2.imread(fname)[:, :, ::-1], dataformats='HWC')
 
             # Hyperparameter burn-in
-            # n_burn = nb - 1  # min(nb // 5 + 1, 1000)  # number of burn-in batches
-            # if ni <= n_burn:
-            #     for m in model.named_modules():
-            #         if m[0].endswith('BatchNorm2d'):
-            #             m[1].momentum = 1 - i / n_burn * 0.99  # BatchNorm2d momentum falls from 1 - 0.01
-            #     g = (i / n_burn) ** 4  # gain rises from 0 - 1
-            #     for x in optimizer.param_groups:
-            #         x['lr'] = hyp['lr0'] * g
-            #         x['weight_decay'] = hyp['weight_decay'] * g
+            n_burn = nb - 1  # min(nb // 5 + 1, 1000)  # number of burn-in batches
+            if ni <= n_burn:
+                for m in model.named_modules():
+                    if m[0].endswith('BatchNorm2d'):
+                        m[1].momentum = 1 - i / n_burn * 0.99  # BatchNorm2d momentum falls from 1 - 0.01
+                g = (i / n_burn) ** 4  # gain rises from 0 - 1
+                for x in optimizer.param_groups:
+                    x['lr'] = hyp['lr0'] * g
+                    x['weight_decay'] = hyp['weight_decay'] * g
 
             # Run model
             pred = model(imgs) # imgs shape -> [8,3,416,416]
@@ -299,18 +293,13 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
 
         # Process epoch results
         final_epoch = epoch + 1 == epochs
-        if args.prebias:
-            print_model_biases(model)
-        elif not args.notest or final_epoch:  # Calculate mAP
-            results, maps = test.test(args.cfg,
-                                      path.VAL_DIR,
-                                      batch_size=args.batch_size,
-                                      img_size=args.img_size,
-                                      model=model,
-                                      conf_thres=0.001 if final_epoch else 0.1,  # 0.1 for speed
-                                      save_json=final_epoch,
-                                      dataloader=testloader,
-                                      class_list= cls)
+        # Calculate mAP
+        results, maps = test.test(
+                                  model=model,
+                                  conf_thres=0.001 if final_epoch else 0.1,  # 0.1 for speed
+                                  save_json=final_epoch,
+                                  dataloader=testloader,
+                                  class_list= cls)
 
         # Write epoch results
         with open(results_file, 'a') as f:
@@ -378,7 +367,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     return results
 
 
-def prebias(args,model_cfg, device, tb_writer, path, mixed_precision):
+def prebias(args, model_cfg, device, tb_writer, path, mixed_precision):
     # trains output bias layers for 1 epoch and creates new backbone
     if args.prebias:
         wdir = os.path.join(path.model_save_path, args.domain)
@@ -387,7 +376,7 @@ def prebias(args,model_cfg, device, tb_writer, path, mixed_precision):
         a = args.img_weights  # save settings
         args.img_weights = False  # disable settings
 
-        train(args,model_cfg, device, tb_writer, path,mixed_precision)  # transfer-learn yolo biases for 1 epoch
+        train(args,model_cfg, device, tb_writer, path, mixed_precision)  # transfer-learn yolo biases for 1 epoch
         create_backbone(last)  # saved results as backbone.pt
 
         args.weights = wdir + 'backbone.pt'  # assign backbone
@@ -413,57 +402,11 @@ def train_model(args, path):
     # scale hyp['obj'] by img_size (evolved at 416)
     hyp['obj'] *= args.img_size / 416.
 
-    if not args.evolve:  # Train normally
-        try:
-            # Start Tensorboard with "tensorboard --logdir=runs", view at http://localhost:6006/
-            from torch.utils.tensorboard import SummaryWriter
-            tb_writer = SummaryWriter()
-        except:
-            pass
-        prebias(args, args.cfg, device, tb_writer, path,mixed_precision)  # optional
-        train(args, args.cfg, device, tb_writer, path, mixed_precision)  # train normally
-
-    else:  # Evolve hyperparameters (optional)
-        args.notest = True  # only test final epoch
-        args.nosave = True  # only save final checkpoint
-        if args.bucket:
-            os.system('gsutil cp gs://%s/evolve.txt .' % args.bucket)  # download evolve.txt if exists
-
-        for _ in range(1):  # generations to evolve
-            if os.path.exists('evolve.txt'):  # if evolve.txt exists: select best hyps and mutate
-                # Select parent(s)
-                x = np.loadtxt('evolve.txt', ndmin=2)
-                parent = 'single'  # parent selection method: 'single' or 'weighted'
-                if parent == 'single' or len(x) == 1:
-                    x = x[fitness(x).argmax()]
-                elif parent == 'weighted':  # weighted combination
-                    n = min(10, x.shape[0])  # number to merge
-                    x = x[np.argsort(-fitness(x))][:n]  # top n mutations
-                    w = fitness(x) - fitness(x).min()  # weights
-                    x = (x[:n] * w.reshape(n, 1)).sum(0) / w.sum()  # new parent
-                for i, k in enumerate(hyp.keys()):
-                    hyp[k] = x[i + 7]
-
-                # Mutate
-                np.random.seed(int(time.time()))
-                s = np.random.random() * 0.3  # sigma
-                g = [1, 1, 1, 1, 1, 1, 1, 0, .1, 1, 1, 1, 1, 1, 1, 1, 1, 1]  # gains
-                for i, k in enumerate(hyp.keys()):
-                    x = (np.random.randn() * s * g[i] + 1) ** 2.0  # plt.hist(x.ravel(), 300)
-                    hyp[k] *= float(x)  # vary by sigmas
-
-            # Clip to limits
-            keys = ['lr0', 'iou_t', 'momentum', 'weight_decay', 'hsv_s', 'hsv_v', 'translate', 'scale', 'fl_gamma']
-            limits = [(1e-5, 1e-2), (0.00, 0.70), (0.60, 0.98), (0, 0.001), (0, .9), (0, .9), (0, .9), (0, .9), (0, 3)]
-            for k, v in zip(keys, limits):
-                hyp[k] = np.clip(hyp[k], v[0], v[1])
-
-            # Train mutation
-            prebias(args, args.cfg, device, tb_writer, path)  # optional
-            results = train(args, args.cfg, device, tb_writer, path,mixed_precision)
-
-            # Write mutation results
-            print_mutation(hyp, results, args.bucket)
-
-            # Plot results
-            # plot_evolution_results(hyp)
+    try:
+        # Start Tensorboard with "tensorboard --logdir=runs", view at http://localhost:6006/
+        from torch.utils.tensorboard import SummaryWriter
+        tb_writer = SummaryWriter()
+    except:
+        pass
+    # prebias(args, args.cfg, device, tb_writer, path, mixed_precision)  # optional
+    train(args, args.cfg, device, tb_writer, path, mixed_precision)  # train normally

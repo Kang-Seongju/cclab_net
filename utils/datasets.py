@@ -273,27 +273,31 @@ def ms_coco(anno_path, cls):
     dic = {}
     img_bbox = {}
     img_path = []
-    shapes = []
+    shapes = {}
     with open(anno_path, 'r') as cf:
         json_data = json.load(cf)
 
     image = json_data['images']
     for imgs in image:
         dic[imgs['id']]= [imgs['file_name'], imgs['height'], imgs['width']]
-        shapes.append([imgs['file_name'], imgs['height'], imgs['width']])
+        shapes[imgs['file_name']] = [imgs['height'], imgs['width']]
         img_bbox[imgs['file_name']] = []
         img_path.append(imgs['file_name'])
 
     nc = len(json_data['categories'])
     for i in range(0, nc, 1):
         if json_data['categories'][i]['name'] not in cls:
-            skippppppp = 1
+            classes[json_data['categories'][i]['id']] = "skip"
         else:
             classes[json_data['categories'][i]['id']] = json_data['categories'][i]['name']
-        
+
     anno = json_data['annotations']
     for an in anno:
         cls_id = an['category_id']
+
+        if classes[cls_id] == "skip":
+            continue
+
         img_name = dic[an['image_id']][0]
 
         height = int(dic[an['image_id']][1])
@@ -337,40 +341,51 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         self.img_files = []
         self.label_files = []
-
+        self.custom_cls = {}
         self.read_file = os.path.join(path.COCO_DIR, link)
 
         if gen == True:
-
 
             self.anno_path = os.path.join(path.COCO_DIR, 'annotations', 'instances_'+self._type+'.json')
             shapes, cls_dic, img_bbox, img_path = ms_coco(self.anno_path, self.cls)
 
             for img in img_path:
                 ip = os.path.join(self.image_path, img)
-                self.img_files.append(ip)
                 lb = img.replace('jpg', 'txt')
                 lp = os.path.join(self.label_path, lb)
-                self.label_files.append(lp)
-                with open(lp, 'w') as f:
-                    for box in img_bbox[img]:
+
+                _str = ""
+
+                for box in img_bbox[img]:
+                    if cls_dic[box[0]] != "skip":
                         custom_cls_id = self.cls.index(cls_dic[box[0]])
-                        f.write(str(custom_cls_id)+' '+ str(box[1])+' '+ str(box[2])+' '+ str(box[3])+' '+ str(box[4]) + '\n')
+                        self.custom_cls[custom_cls_id] = cls_dic[box[0]]
+                        _str += str(custom_cls_id)+' '+ str(box[1])+' '+ str(box[2])+' '+ str(box[3])+' '+ str(box[4]) + '\n'
+
+                if len(_str) > 0:
+
+                    self.label_files.append(lp)
+                    self.img_files.append(ip)
+                    with open(lp, 'w') as f:
+                        f.write(_str)
 
             with open(os.path.join(self.shape_path, 'shapes.txt'), 'w') as f:
-                for sh in shapes:
-                    f.write(str(sh[1]) + ' ' + str(sh[2]) + ' ' + sh[0])
+                for imf in self.img_files:
+                    file_name = imf.split('/')[6]
+                    f.write(str(shapes[file_name][0]) + ' ' + str(shapes[file_name][1]) + ' ' + file_name)
         else:
 
-            images_list = os.listdir(self.image_path)
-            for i in images_list:
-                img_path = os.path.join(self.image_path, i)
-                label_name = i.replace('jpg','txt')
-                self.img_files.append(img_path)
-                self.label_files.append(os.path.join(self.label_path, label_name))
+            label_name = os.listdir(self.label_path)
+            for i in label_name:
+                label_path = os.path.join(self.label_path, i)
+                img_path = i.replace('txt','jpg')
+                self.label_files.append(label_path)
+                self.img_files.append(os.path.join(self.image_path, img_path))
 
-                # if len(self.img_files) > 32:
+                # if len(self.img_files) > 50:
                 #     break
+
+        print(self.custom_cls)
 
         n = len(self.img_files)
 
@@ -384,6 +399,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.hyp = hyp
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
+        # self.rect = True
 
         # Rectangular Training  https://github.com/ultralytics/yolov3/issues/232
         if self.rect:
@@ -424,7 +440,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         #
         if cache_labels or image_weights:  # cache labels for faster training
-
             self.labels = [np.zeros((0, 5))] * n
             extract_bounding_boxes = False
             create_datasubset = False
@@ -525,20 +540,19 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         mosaic = True and self.augment  # load 4 images at a time into a mosaic (only during training)
         if mosaic:
             # Load mosaic
-
             img, labels = load_mosaic(self, index)
             h, w = img.shape[:2]
             ratio, pad = None, None
 
         else:
             # Load image
-            img = load_image(self, index)
+
+            imgs = load_image(self, index)
 
             # Letterbox
-            h, w = img.shape[:2]
+            h, w = imgs.shape[:2]
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
-
+            img, ratio, pad = letterbox(imgs, shape, auto=False, scaleup=self.augment)
 
             # Load labels
             labels = []
@@ -603,9 +617,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
-
         # img size -> (3,416,416)
-
         return torch.from_numpy(img), labels_out, img_path, ((h, w), (ratio, pad))
 
     @staticmethod
@@ -736,8 +748,8 @@ def letterbox(img, new_shape=(416, 416), color=(128, 128, 128),
         img = cv2.resize(img, new_unpad, interpolation=interp)  # INTER_AREA is better, INTER_LINEAR is faster
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
-    return img, ratio, (dw, dh)
+    imgs = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+    return imgs, ratio, (dw, dh)
 
 
 def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10, border=0):
