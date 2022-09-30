@@ -21,5 +21,5 @@ class PATH():
 
 if __name__ == '__main__':
     args = parse_arguments()
-    path = PATH('visdrone')
+    path = PATH('pascal')
     train_model(args, path)

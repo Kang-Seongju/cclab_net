@@ -80,9 +80,15 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
 
     # Initialize model
     model = CCLAB(model_cfg, arc=args.arc, num_cls = nc).to(device)
-    
-    summary_(model, (3,640,640), batch_size= 1)
+    # Start training
+    nb = len(dataloader)
+    model.nc = nc  # attach number of classes to model
+    model.arc = args.arc  # attach yolo architecture
+    model.hyp = hyp  # attach hyperparameters to model
+    model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
+    maps = np.zeros(nc)  # mAP per class
 
+    print(model.hyp['width'], model.hyp['height'])
     # Optimizer
     pg0, pg1 = [], []  # optimizer parameter groups
     for k, v in dict(model.named_parameters()).items():
@@ -190,13 +196,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn)
 
-    # Start training
-    nb = len(dataloader)
-    model.nc = nc  # attach number of classes to model
-    model.arc = args.arc  # attach yolo architecture
-    model.hyp = hyp  # attach hyperparameters to model
-    model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
-    maps = np.zeros(nc)  # mAP per class
+
     # torch.autograd.set_detect_anomaly(True)
     results = (0, 0, 0, 0, 0, 0, 0)  # 'P', 'R', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification'
     t0 = time.time()

@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from threading import Thread
 
+import xml.etree.ElementTree as ET
+
 import json
 import cv2
 import numpy as np
@@ -379,6 +381,51 @@ def visdrone(anno_path, image_path, cls):
                 
     return classes, img_bbox, img_path
 
+def pascal(anno_path, cls):
+
+    classes = {}
+
+    classes = { 0 : 'background', 1 : 'aeroplane', 2 : 'bicycle', 3: 'bird', 4 : 'boat', 5: 'bottle', 6: 'bus', 7:'car', 8:'cat', 9: 'chair', 10: 'cow', 
+                11: 'diningtable', 12:'dog', 13: 'horse', 14: 'motorbike', 15:'person', 16:'pottedplant', 17: 'sheep', 18: 'sofa', 19: 'train', 20: 'tvmonitor'}
+
+    img_bbox = {}
+    img_path = []
+
+    anno_files = os.listdir(anno_path)
+    for anno in anno_files:
+        file_names = anno
+        img_names = file_names.replace('xml', 'jpg')
+        img_path.append(img_names)
+        img_bbox[img_names] = []
+
+        xml = ET.parse(file_names).getroot()
+
+        img_size = xml.iter('size')
+        width = img_size.find('width')
+        height = img_size.find('height')
+
+        for obj in xml.iter('object'):
+            # VOC 는 원점이 1,1 부터 시작이므로 0,0 으로 바꾼다
+            cls_name = obj.find('name')
+            diff_score = int(obj.find('ddificult'))
+            if cls_name not in cls or diff_score == 0:
+                classes[classes.index('cls_name')] = 'skip'
+            else:
+                xmin = float(obj.find('bndbox').find('xmin').text)-1.0
+                ymin = float(obj.find('bndbox').find('ymin').text)-1.0
+                xmax = float(obj.find('bndbox').find('xmax').text)-1.0
+                ymax = float(obj.find('bndbox').find('ymax').text)-1.0
+
+                cx = (xmax + xmin) / 2.0 / width
+                cy = (ymax + ymin) / 2.0 / height
+                w = (xmax - xmin) / width
+                y = (ymax - ymin) / height
+
+                cls_id = cls.index(cls_name)
+
+                img_bbox[img_names].append([cls_id, cx,cy, w, y])
+
+    return classes, img_bbox, img_path
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, _type, path, class_list, img_size=416, batch_size=16, augment=False, hyp=None, image_weights=False,
