@@ -48,8 +48,6 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     createFolder(backup_wdir)
     createFolder(wdir)
 
-    img_size = args.img_size
-
     last = os.path.join(wdir, 'custom_last.pt')
     best = os.path.join(wdir, 'custom_best.pt')
     results_file = os.path.join(wdir, 'custom_results.txt')
@@ -66,6 +64,10 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     nc = len(cls)
     # Initialize
 
+    model = CCLAB(model_cfg, arc=args.arc, num_cls = nc).to(device)
+
+    img_size = model.height
+
     init_seeds()
     if args.multi_scale:
         img_sz_min = round(img_size / 32 / 1.5)
@@ -78,17 +80,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     for f in glob.glob('*_batch*.jpg') + glob.glob(results_file):
         os.remove(f)
 
-    # Initialize model
-    model = CCLAB(model_cfg, arc=args.arc, num_cls = nc).to(device)
-    # Start training
-    nb = len(dataloader)
-    model.nc = nc  # attach number of classes to model
-    model.arc = args.arc  # attach yolo architecture
-    model.hyp = hyp  # attach hyperparameters to model
-    model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
-    maps = np.zeros(nc)  # mAP per class
 
-    print(model.hyp['width'], model.hyp['height'])
     # Optimizer
     pg0, pg1 = [], []  # optimizer parameter groups
     for k, v in dict(model.named_parameters()).items():
@@ -166,7 +158,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
         model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
         model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
 
-    GenOp = False
+    GenOp = True
     # Dataset
     dataset = LoadImagesAndLabels("train", path, cls, img_size, batch_size,
                                   augment = False,
@@ -196,7 +188,12 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn)
 
-
+    model.nc = nc  # attach number of classes to model
+    model.arc = args.arc  # attach yolo architecture
+    model.hyp = hyp  # attach hyperparameters to model
+    maps = np.zeros(nc)  # mAP per class
+    nb = len(dataloader)
+    model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
     # torch.autograd.set_detect_anomaly(True)
     results = (0, 0, 0, 0, 0, 0, 0)  # 'P', 'R', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification'
     t0 = time.time()
