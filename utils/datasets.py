@@ -433,10 +433,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         f.write(_str)
         else:
             if path.dataset == "visdrone":
-                
                 self.anno_path = os.path.join(self.image_path, 'annotations')
                 self.image_path = os.path.join(self.image_path, 'images') 
-                
+
             label_name = os.listdir(self.label_path)
             for i in label_name:
                 label_path = os.path.join(self.label_path, i)

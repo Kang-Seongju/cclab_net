@@ -7,7 +7,7 @@ from utils.utils import *
 # replace False to True for tensorrt trasformation
 ONNX_EXPORT = False
 
-def create_modules(module_defs, img_size, arc):
+def create_modules(module_defs, img_size, arc, num_cls):
     # Constructs module list of layer blocks from module configuration in module_defs
 
     hyperparams = module_defs.pop(0)
@@ -54,7 +54,7 @@ def create_modules(module_defs, img_size, arc):
             size = int(mdef['size']) #kernel_size
             filters = int(mdef['filters']) # out_channel
             modules.add_module('attention', patch_wise_attention_layer(in_channel = output_filters[-1], kernel_size= size))
-
+        
         elif mdef['type'] == 'maxpool':
             size = int(mdef['size'])
             stride = int(mdef['stride'])
@@ -85,11 +85,35 @@ def create_modules(module_defs, img_size, arc):
             # torch.Size([16, 64, 208, 208]) <-- # stride 2 interpolate dimensions 2 and 3 to cat with prior layer
             pass
 
+        elif mdef['type'] == 'before':
+
+            filters = (num_cls + 5) * 3
+
+            size = int(mdef['size'])
+            stride = int(mdef['stride']) if 'stride' in mdef else (int(mdef['stride_y']), int(mdef['stride_x']))
+            pad = (size - 1) // 2 if int(mdef['pad']) else 0
+            modules.add_module('Conv2d', nn.Conv2d(in_channels=output_filters[-1],
+                                                   out_channels=filters,
+                                                   kernel_size=size,
+                                                   stride=stride,
+                                                   padding=pad,
+                                                   groups=int(mdef['groups']) if 'groups' in mdef else 1,
+                                                   bias=False))
+            if bn:
+                modules.add_module('BatchNorm2d', nn.BatchNorm2d(filters, momentum=0.1))
+            if mdef['activation'] == 'leaky':  # TODO: activation study https://github.com/ultralytics/yolov3/issues/441
+                modules.add_module('activation', nn.LeakyReLU(0.1, inplace=True))
+                # modules.add_module('activation', nn.PReLU(num_parameters=1, init=0.10))
+            elif mdef['activation'] == 'swish':
+                modules.add_module('activation', Swish())
+            elif mdef['activation'] == 'gelu':
+                modules.add_module('activation', nn.GELU())
+
         elif mdef['type'] == 'yolo':
             yolo_index += 1
             mask = [int(x) for x in mdef['mask'].split(',')]  # anchor mask
             modules = YOLOLayer(anchors=mdef['anchors'][mask],  # anchor list
-                                nc=int(mdef['classes']),  # number of classes
+                                nc = num_cls,  # number of classes
                                 img_size=img_size,  # (416, 416)
                                 yolo_index=yolo_index,  # 0, 1 or 2
                                 arc=arc)  # yolo architecture
@@ -159,9 +183,9 @@ class G_ELAN(nn.Module):
         self.phase = phase
         self.half = in_channel // 2
         self.GN1 = GaussianDiffusionTrainer(0.07)
-        self.GN2 = GaussianDiffusionTrainer(0.12)
-        self.GN3 = GaussianDiffusionTrainer(0.17)
-        self.GN4 = GaussianDiffusionTrainer(0.22)
+        self.GN2 = GaussianDiffusionTrainer(0.05)
+        self.GN3 = GaussianDiffusionTrainer(0.10)
+        self.GN4 = GaussianDiffusionTrainer(0.08)
         self.conv2d = nn.Sequential(
             nn.Conv2d(in_channels = self.half, out_channels = self.half, kernel_size = 3, stride = 1, padding = 1),
             nn.BatchNorm2d(self.half, momentum = 0.1),
@@ -359,11 +383,11 @@ class YOLOLayer(nn.Module):
 class CCLAB(nn.Module):
     # YOLOv3 object detection model
 
-    def __init__(self, cfg, img_size=(416, 416), arc='default'):
+    def __init__(self, cfg, img_size=(416, 416), arc='default', num_cls = 80):
         super(CCLAB, self).__init__()
-
+        self.num_cls = num_cls
         self.module_defs = parse_model_cfg(cfg)
-        self.module_list, self.routs = create_modules(self.module_defs, img_size, arc)
+        self.module_list, self.routs = create_modules(self.module_defs, img_size, arc, self.num_cls)
         self.yolo_layers = get_yolo_layers(self)
         # Darknet Header https://github.com/AlexeyAB/darknet/issues/2914#issuecomment-496675346
         self.version = np.array([0, 2, 5], dtype=np.int32)  # (int32) version info: major, minor, revision
@@ -377,7 +401,7 @@ class CCLAB(nn.Module):
 
         for i, (mdef, module) in enumerate(zip(self.module_defs, self.module_list)):
             mtype = mdef['type']
-            if mtype in ['convolutional', 'upsample', 'maxpool', 'attention', 'gelan']:
+            if mtype in ['convolutional', 'upsample', 'maxpool', 'attention', 'gelan', 'before']:
                 x = module(x)
             elif mtype == 'route':
                 layers = [int(x) for x in mdef['layers'].split(',')]
@@ -464,7 +488,7 @@ def save_weights(self, path='model.weights', cutoff=-1):
 
         # Iterate through layers
         for i, (mdef, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
-            if mdef['type'] == 'convolutional':
+            if mdef['type'] == 'convolutional' or mdef['type'] ==  'before':
                 conv_layer = module[0]
                 # If batch norm, load bn first
                 if mdef['batch_normalize']:

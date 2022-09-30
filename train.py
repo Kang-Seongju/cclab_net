@@ -78,7 +78,7 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
         os.remove(f)
 
     # Initialize model
-    model = CCLAB(model_cfg, arc=args.arc).to(device)
+    model = CCLAB(model_cfg, arc=args.arc, num_cls = nc).to(device)
     
     # Optimizer
     pg0, pg1 = [], []  # optimizer parameter groups
@@ -157,7 +157,6 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
         model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
         model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
 
-    #transform
     GenOp = False
     # Dataset
     dataset = LoadImagesAndLabels("train", path, cls, img_size, batch_size,
