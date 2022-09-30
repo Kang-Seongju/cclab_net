@@ -4,11 +4,12 @@ import torch.distributed as dist
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 
-# from torchsummary import summary as summary_
+from torchsummary import summary as summary_
 from torch.utils.data import DataLoader
 
 import test  # import test.py to get mAP after each epoch
 from proposed_model import *
+# from models import *
 from utils.datasets import *
 from utils.utils import *
 
@@ -80,6 +81,8 @@ def train(args, model_cfg, device, tb_writer, path, mixed_precision):
     # Initialize model
     model = CCLAB(model_cfg, arc=args.arc, num_cls = nc).to(device)
     
+    summary_(model, (3,640,640), batch_size= 1)
+
     # Optimizer
     pg0, pg1 = [], []  # optimizer parameter groups
     for k, v in dict(model.named_parameters()).items():

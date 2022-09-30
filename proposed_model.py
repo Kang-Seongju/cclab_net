@@ -11,10 +11,12 @@ def create_modules(module_defs, img_size, arc, num_cls):
     # Constructs module list of layer blocks from module configuration in module_defs
 
     hyperparams = module_defs.pop(0)
+    
     if int(hyperparams['phase']) == 0: 
         phase = "train"
     else:
         phase = "inference"
+
     output_filters = [int(hyperparams['channels'])]
     module_list = nn.ModuleList()
     routs = []  # list of layers which rout to deeper layes
@@ -145,9 +147,10 @@ class patch_wise_attention_layer(nn.Module):
         # bs , c, h, w
         in_dim = x.shape
         bs, ch, h, w = in_dim
-        patch_cnt = h // self.kernel_size
+        patch_height = h // self.kernel_size
+        patch_width = w // self.kernel_size
         x1 = self.patch_block(x) # [bs, c, kernel_size, kernel_size]
-        x = x1.view([bs*ch, -1, patch_cnt, patch_cnt]) # 채널 별 패치 간 연산을 위해
+        x = x1.view([bs*ch, -1, patch_height, patch_width]) # 채널 별 패치 간 연산을 위해
         x = self.fp(x)
         x = self.unfold(x)
         x = x.view([bs, ch, 3*3, -1]).permute((0,3,1,2)).contiguous().view([-1, ch, 3*3])
@@ -155,8 +158,11 @@ class patch_wise_attention_layer(nn.Module):
         
         xxT = torch.bmm(xT,x) # 확인
 
-        xxT = xxT.view([bs* patch_cnt *patch_cnt, -1])
-        xxT = torch.mean(xxT, dim = 1).view([bs, 1, patch_cnt, patch_cnt]) # sum or mean 
+        xxT = xxT.view([bs* patch_height *patch_width, -1])
+
+        xxT = torch.sum(xxT, dim = 1).view([bs, 1, patch_height, patch_width]) # sum or mean 
+        xxT = torch.sigmoid(xxT)
+
         y = xxT.repeat(1, ch, 1, 1)
                 
         out = x1*y
