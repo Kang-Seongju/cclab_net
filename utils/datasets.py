@@ -381,7 +381,7 @@ def visdrone(anno_path, image_path, cls):
                 
     return classes, img_bbox, img_path
 
-def pascal(anno_path, cls):
+def pascal(anno_path, image_path, cls):
     
     classes = { 0 : 'background', 1 : 'aeroplane', 2 : 'bicycle', 3: 'bird', 4 : 'boat', 5: 'bottle', 6: 'bus', 7:'car', 8:'cat', 9: 'chair', 10: 'cow', 
                 11: 'diningtable', 12:'dog', 13: 'horse', 14: 'motorbike', 15:'person', 16:'pottedplant', 17: 'sheep', 18: 'sofa', 19: 'train', 20: 'tvmonitor'}
@@ -391,14 +391,15 @@ def pascal(anno_path, cls):
 
     r_classes = {v:k for k,v in classes.items()}
     
-    anno_files = os.listdir(anno_path)
-    for anno in anno_files:
-        file_names = anno
-        img_names = file_names.replace('xml', 'jpg')
-        img_path.append(img_names)
-        img_bbox[img_names] = []
+    img_name = os.listdir(image_path)
 
-        xml = ET.parse(os.path.join(anno_path, file_names)).getroot()
+    for img in img_name:
+        file_names = img
+        anno_names = file_names.replace('jpg', 'xml')
+        img_path.append(img)
+        img_bbox[img] = []
+
+        xml = ET.parse(os.path.join(anno_path, anno_names)).getroot()
 
         for img_size in xml.iter('size'):
 
@@ -429,7 +430,7 @@ def pascal(anno_path, cls):
 
                 cls_id = r_classes[cls_name]
 
-                img_bbox[img_names].append([cls_id, cx,cy, w, y])
+                img_bbox[img].append([cls_id, cx,cy, w, y])
 
     return classes, img_bbox, img_path
 
@@ -468,7 +469,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             if path.dataset == "pascal":
                 self.anno_path = os.path.join(path.DIR, 'annotations')
-                cls_dic, img_bbox, img_path = pascal(self.anno_path, self.cls)
+                cls_dic, img_bbox, img_path = pascal(self.anno_path, self.image_path, self.cls)
 
             for img in img_path:
                 ip = os.path.join(self.image_path, img)
