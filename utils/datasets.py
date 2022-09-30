@@ -382,15 +382,15 @@ def visdrone(anno_path, image_path, cls):
     return classes, img_bbox, img_path
 
 def pascal(anno_path, cls):
-
-    classes = {}
-
+    
     classes = { 0 : 'background', 1 : 'aeroplane', 2 : 'bicycle', 3: 'bird', 4 : 'boat', 5: 'bottle', 6: 'bus', 7:'car', 8:'cat', 9: 'chair', 10: 'cow', 
                 11: 'diningtable', 12:'dog', 13: 'horse', 14: 'motorbike', 15:'person', 16:'pottedplant', 17: 'sheep', 18: 'sofa', 19: 'train', 20: 'tvmonitor'}
 
     img_bbox = {}
     img_path = []
 
+    r_classes = {v:k for k,v in classes.items()}
+    
     anno_files = os.listdir(anno_path)
     for anno in anno_files:
         file_names = anno
@@ -398,18 +398,24 @@ def pascal(anno_path, cls):
         img_path.append(img_names)
         img_bbox[img_names] = []
 
-        xml = ET.parse(file_names).getroot()
+        xml = ET.parse(os.path.join(anno_path, file_names)).getroot()
 
-        img_size = xml.iter('size')
-        width = img_size.find('width')
-        height = img_size.find('height')
+        for img_size in xml.iter('size'):
+
+            width = int(img_size.find('width').text)
+            height = int(img_size.find('height').text)
 
         for obj in xml.iter('object'):
             # VOC 는 원점이 1,1 부터 시작이므로 0,0 으로 바꾼다
-            cls_name = obj.find('name')
-            diff_score = int(obj.find('ddificult'))
-            if cls_name not in cls or diff_score == 0:
-                classes[classes.index('cls_name')] = 'skip'
+
+            cls_name = str(obj.find('name').text)
+            diff_score = int(obj.find('difficult').text)
+            
+            if cls_name not in cls:
+                c_id = r_classes[cls_name]
+                classes[c_id] = 'skip'
+            elif diff_score == 1:
+                skippppppppppp = 1
             else:
                 xmin = float(obj.find('bndbox').find('xmin').text)-1.0
                 ymin = float(obj.find('bndbox').find('ymin').text)-1.0
@@ -421,7 +427,7 @@ def pascal(anno_path, cls):
                 w = (xmax - xmin) / width
                 y = (ymax - ymin) / height
 
-                cls_id = cls.index(cls_name)
+                cls_id = r_classes[cls_name]
 
                 img_bbox[img_names].append([cls_id, cx,cy, w, y])
 
@@ -459,6 +465,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 self.image_path = os.path.join(self.image_path, 'images') 
 
                 cls_dic, img_bbox, img_path = visdrone(self.anno_path, self.image_path, self.cls)
+
+            if path.dataset == "pascal":
+                self.anno_path = os.path.join(path.DIR, 'annotations')
+                cls_dic, img_bbox, img_path = pascal(self.anno_path, self.cls)
 
             for img in img_path:
                 ip = os.path.join(self.image_path, img)
